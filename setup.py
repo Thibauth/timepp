@@ -12,6 +12,9 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/x-rst",
     py_modules = ["timepp"],
+    install_requires = [
+        'scipy',
+        ],
     url="https://github.com/Thibauth/timepp",
     python_requires='>=3.6',
 )
