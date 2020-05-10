@@ -47,9 +47,10 @@ class PoissonProcess:
 
     def inverse(self, s, tmax, err=1e-10):
         """Returns the inverse of the integral function. The default
-        implementation performs a bisection search. If a closed-formed for the
-        inverse function is known, it is recommended to override this method by
-        specifying the ``inverse`` parameter of :class:`PoissonProcess`.
+        implementation performs a bisection search. If a closed-formed
+        expression for the inverse function is known, it is recommended to
+        override this method by specifying the ``inverse`` parameter of
+        :class:`PoissonProcess`.
 
         :param float s: the value to invert
         :param float t: an upper-bound on the inverted value. That is, the
@@ -67,7 +68,7 @@ class PoissonProcess:
                 b = mid
         return (a + b) / 2.0
 
-    def events(self, tmax):
+    def events(self, tmax, sort=True):
         """Samples a random realization of the Poisson process over the interval
         ``[0,tmax]``. The return value is a ``numpy.array`` of the random event
         times, sorted by increasing time. The running time is linear in the
@@ -78,7 +79,10 @@ class PoissonProcess:
         u = uniform(high=it, size=n)
         for i in range(n):
             u[i] = self.inverse(u[i], tmax)
-        return np.sort(u)
+        if sort:
+            return np.sort(u)
+        else:
+            return u
 
 
 class HomogeneousPoissonProcess(PoissonProcess):
@@ -93,10 +97,14 @@ class HomogeneousPoissonProcess(PoissonProcess):
         ""
         return self.rate * t
 
-    def events(self, tmax):
+    def events(self, tmax, sort=True):
         ""
         n = poisson(self.rate * tmax)
-        return np.sort(uniform(high=tmax, size=n))
+        u = uniform(high=tmax, size=n)
+        if sort:
+            return np.sort(u)
+        else:
+            return u
 
 
 class ExpPoissonProcess(PoissonProcess):
@@ -118,14 +126,16 @@ class ExpPoissonProcess(PoissonProcess):
         ""
         return -1.0 / self.beta * log(1.0 - s * self.beta / self.alpha)
 
-    def events(self, tmax):
+    def events(self, tmax, sort=True):
         ""
         it = self.integral(tmax)
         n = poisson(lam=it, size=1)[0]
         u = uniform(high=it, size=n)
-        return np.sort(
-            -1.0 / self.beta * np.log(1.0 - self.beta / self.alpha * u)
-        )
+        i = -1.0 / self.beta * np.log(1.0 - self.beta / self.alpha * u)
+        if sort:
+            return np.sort(u)
+        else:
+            return u
 
 
 class GraphHawkesProcess:
@@ -133,7 +143,7 @@ class GraphHawkesProcess:
     a graph.
 
     Denote by :math:`\lambda_0` the rate function of the background process and
-    by :math:`\\nu` the rate function of the *exciting* process, then the
+    by :math:`\\nu` the rate function of the offspring process, then the
     temporal point process occurring at each vertex :math:`v` of the graph has
     a conditional intensity function given by
 
@@ -147,8 +157,8 @@ class GraphHawkesProcess:
     is the binary indicator of whether an edge between :math:`v_k` and
     :math:`v` exists.
 
-    The ``background`` and ``excitation`` parameters are used to specify the
-    background and excitation processes respectively. These should be classes
+    The ``background`` and ``offspring`` parameters are used to specify the
+    background and offspring processes respectively. They should be classes
     derived from :class:`PoissonProcess`, or at the very least, classes
     equipped with an `events()` method to sample random event times.
 
@@ -158,10 +168,10 @@ class GraphHawkesProcess:
     ``graph`` a single vertex with a self-loop: ``{0: [0]}``.
     """
 
-    def __init__(self, graph, background, excitation):
+    def __init__(self, graph, background, offspring):
         self.graph = graph
         self.background = background
-        self.kernel = excitation
+        self.kernel = offspring
 
     def events(self, tmax):
         """Samples a random realization of the Hawkes process over the interval
@@ -175,12 +185,12 @@ class GraphHawkesProcess:
 
         # generate background events (first generation) for each node
         for node in self.graph:
-            a = self.background.events(tmax)
+            a = self.background.events(tmax, sort=False)
             if a.size > 0:
                 gen[node] = a
                 events[node].append(a)
 
-        # generate triggered events generation by generation
+        # generate offspring events generation by generation
         while gen:
             next_gen = dict()
             for node, times in gen.items():
@@ -189,7 +199,7 @@ class GraphHawkesProcess:
                         # each (node, time) event from the previous generation
                         # induces a new Poisson process starting from time on
                         # each of its neighbor
-                        a = time + self.kernel.events(tmax - time)
+                        a = time + self.kernel.events(tmax - time, sort=False)
                         if a.size > 0:
                             next_gen[node] = a
                             events[node].append(a)
