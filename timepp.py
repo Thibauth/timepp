@@ -101,22 +101,31 @@ class HomogeneousPoissonProcess(PoissonProcess):
 
 class ExpPoissonProcess(PoissonProcess):
     """This class represents a Poisson process with an exponentially decaying
-    rate function of the form :math:`\lambda(t) = \\alpha e^{-\\beta t}`.
-    Recall that in particular, the expected number of events over
-    :math:`[0,\infty)` is :math:`\\alpha/\\beta`.
+    rate function of the form :math:`\lambda(t) = \\alpha e^{-\\beta t}`.  In
+    particular, the expected number of events over :math:`[0,\infty)` is
+    :math:`\\alpha/\\beta`.
     """
 
     def __init__(self, alpha, beta):
         self.alpha = float(alpha)
         self.beta = float(beta)
-        self.integral = self._integral
-        self.inverse = self._inverse
 
-    def _integral(self, t):
-        return self.alpha / self.beta * (1 - exp(-self.beta * t))
+    def integral(self, t):
+        ""
+        return self.alpha / self.beta * (1.0 - exp(-self.beta * t))
 
-    def _inverse(self, s, t):
-        return -1 / self.beta * log(1 - s * self.beta / self.alpha)
+    def inverse(self, s, t):
+        ""
+        return -1.0 / self.beta * log(1.0 - s * self.beta / self.alpha)
+
+    def events(self, tmax):
+        ""
+        it = self.integral(tmax)
+        n = poisson(lam=it, size=1)[0]
+        u = uniform(high=it, size=n)
+        return np.sort(
+            -1.0 / self.beta * np.log(1.0 - self.beta / self.alpha * u)
+        )
 
 
 class GraphHawkesProcess:
@@ -141,14 +150,13 @@ class GraphHawkesProcess:
     The ``background`` and ``excitation`` parameters are used to specify the
     background and excitation processes respectively. These should be classes
     derived from :class:`PoissonProcess`, or at the very least, classes
-    equipped with a `events()` method to sample random event times.
+    equipped with an `events()` method to sample random event times.
 
     The ``graph`` parameter should be an iterable and indexable object, such
     that ``graph[k]`` returns an iterable sequence of vertex k's neighbors. For
     example, a univariate Hawkes Process can be obtained by specifying for
     ``graph`` a single vertex with a self-loop: ``{0: [0]}``.
     """
-
 
     def __init__(self, graph, background, excitation):
         self.graph = graph
@@ -162,32 +170,32 @@ class GraphHawkesProcess:
         occurred at this vertex. The running time is linear in the number of
         sampled events.
         """
-        events = set()
-        gen = set()
+        events = defaultdict(list)
+        gen = dict()
 
         # generate background events (first generation) for each node
         for node in self.graph:
-            gen |= set((node, t) for t in self.background.events(tmax))
-        events |= gen
+            a = self.background.events(tmax)
+            if a.size > 0:
+                gen[node] = a
+                events[node].append(a)
 
         # generate triggered events generation by generation
         while gen:
-            next_gen = set()
-            for node, time in gen:
-                for neighbor in self.graph[node]:
-                    # each event (node, time) from the previous generation
-                    # induces a new Poisson process starting from time on each
-                    # of its neighbor
-                    next_gen |= set(
-                        (neighbor, t) for t in time + self.kernel.events(tmax - time)
-                    )
+            next_gen = dict()
+            for node, times in gen.items():
+                for time in times:
+                    for neighbor in self.graph[node]:
+                        # each (node, time) event from the previous generation
+                        # induces a new Poisson process starting from time on
+                        # each of its neighbor
+                        a = time + self.kernel.events(tmax - time)
+                        if a.size > 0:
+                            next_gen[node] = a
+                            events[node].append(a)
             gen = next_gen
-            events |= gen
 
-        # collect events by node and sort
-        res = defaultdict(list)
-        for node, time in events:
-            res[node].append(time)
-        for node in res:
-            res[node].sort()
-        return res
+        return {
+            node: np.sort(np.concatenate(times))
+            for (node, times) in events.items()
+        }
